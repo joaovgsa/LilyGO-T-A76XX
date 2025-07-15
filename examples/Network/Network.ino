@@ -4,7 +4,7 @@
  * @license   MIT
  * @copyright Copyright (c) 2023  Shenzhen Xin Yuan Electronic Technology Co., Ltd
  * @date      2023-11-16
- *
+ * * Example is suitable for A7670X/A7608X/SIM7670G/SIM7000G/SIM7600 series
  */
 #define TINY_GSM_RX_BUFFER          1024 // Set RX buffer to 1Kb
 
@@ -23,7 +23,7 @@ TinyGsm modem(debugger);
 TinyGsm modem(SerialAT);
 #endif
 
-// It depends on the operator whether to set up an APN. If some operators do not set up an APN, 
+// It depends on the operator whether to set up an APN. If some operators do not set up an APN,
 // they will be rejected when registering for the network. You need to ask the local operator for the specific APN.
 // APNs from other operators are welcome to submit PRs for filling.
 #define NETWORK_APN     "lf.br"             //CHN-CT: China Telecom
@@ -37,16 +37,33 @@ void setup()
     SerialAT.begin(115200, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
 
 #ifdef BOARD_POWERON_PIN
+    /* Set Power control pin output
+    * * @note      Known issues, ESP32 (V1.2) version of T-A7670, T-A7608,
+    *            when using battery power supply mode, BOARD_POWERON_PIN (IO12) must be set to high level after esp32 starts, otherwise a reset will occur.
+    * */
     pinMode(BOARD_POWERON_PIN, OUTPUT);
     digitalWrite(BOARD_POWERON_PIN, HIGH);
 #endif
 
     // Set modem reset pin ,reset modem
+#ifdef MODEM_RESET_PIN
     pinMode(MODEM_RESET_PIN, OUTPUT);
     digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL); delay(100);
     digitalWrite(MODEM_RESET_PIN, MODEM_RESET_LEVEL); delay(2600);
     digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL);
+#endif
 
+#ifdef MODEM_FLIGHT_PIN
+    // If there is an airplane mode control, you need to exit airplane mode
+    pinMode(MODEM_FLIGHT_PIN, OUTPUT);
+    digitalWrite(MODEM_FLIGHT_PIN, HIGH);
+#endif
+
+    // Pull down DTR to ensure the modem is not in sleep state
+    pinMode(MODEM_DTR_PIN, OUTPUT);
+    digitalWrite(MODEM_DTR_PIN, LOW);
+
+    // Turn on the modem
     pinMode(BOARD_PWRKEY_PIN, OUTPUT);
     digitalWrite(BOARD_PWRKEY_PIN, LOW);
     delay(100);
@@ -71,6 +88,24 @@ void setup()
     }
     Serial.println();
 
+#define A7670X_LOG_CAPTURE  //Used to capture networking information and restart the modem
+
+#ifdef A7670X_LOG_CAPTURE
+    Serial.println("Restart modem");
+    //Rset modem
+    modem.sendAT("+CFUN=6");
+    modem.waitResponse();
+
+    // Wait modem reset
+    delay(10000);
+
+    // Check at respones
+    while (!modem.testAT(1000)) {
+        Serial.println(".");
+    }
+    Serial.println();
+#endif
+
     // Check if SIM card is online
     SimStatus sim = SIM_ERROR;
     while (sim != SIM_READY) {
@@ -93,6 +128,7 @@ void setup()
     // Get model info
     modem.sendAT("+SIMCOMATI");
     modem.waitResponse();
+    delay(3000);
 
     //SIM7672G Can't set network mode
 #ifndef TINY_GSM_MODEM_SIM7672
@@ -142,6 +178,12 @@ void setup()
     }
     Serial.println();
 
+#ifdef MODEM_REG_SMS_ONLY
+    while (status == REG_SMS_ONLY) {
+        Serial.println("Registered for \"SMS only\", home network (applicable only when E-UTRAN), this type of registration cannot access the network. Please check the APN settings and ask the operator for the correct APN information and the balance and package of the SIM card. If you still cannot connect, please replace the SIM card and test again. Related ISSUE: https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/issues/307#issuecomment-3034800353");
+        delay(5000);
+    }
+#endif
 
     Serial.printf("Registration Status:%d\n", status);
     delay(1000);
@@ -152,7 +194,7 @@ void setup()
         Serial.println(ueInfo);
     }
 
-    if (!modem.enableNetwork()) {
+    if (!modem.setNetworkActive()) {
         Serial.println("Enable network failed!");
     }
 
@@ -162,7 +204,19 @@ void setup()
     Serial.print("Network IP:"); Serial.println(ipAddress);
 
 
-
+    String resolved_ip_addr;
+    uint32_t rep_data_packet_size;
+    uint32_t tripTime;
+    uint8_t TTL;
+    for (int i = 0; i < 20; ++i) {
+        int res = modem.ping("www.baidu.com", resolved_ip_addr, rep_data_packet_size, tripTime, TTL);
+        if (res == 1) {
+            Serial.printf("Reply from %s: bytes=%u time=%ums TTL=%u\n", resolved_ip_addr, rep_data_packet_size, tripTime, TTL);
+        } else {
+            Serial.printf("Error code : %d\n", res);
+        }
+        delay(1000);
+    }
 }
 
 void loop()
@@ -175,3 +229,7 @@ void loop()
     }
     delay(1);
 }
+
+#ifndef TINY_GSM_FORK_LIBRARY
+#error "No correct definition detected, Please copy all the [lib directories](https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/tree/main/lib) to the arduino libraries directory , See README"
+#endif

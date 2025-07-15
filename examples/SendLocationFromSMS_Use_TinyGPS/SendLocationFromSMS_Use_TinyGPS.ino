@@ -16,6 +16,9 @@
 
 #include "utilities.h"
 
+#ifdef LILYGO_SIM7000G
+#warning "SIM7000G SMS function, the network access mode must be GSM, not NB-IOT"
+#endif
 
 // Define the serial console for debug prints, if needed
 #define TINY_GSM_DEBUG SerialMon
@@ -112,18 +115,33 @@ bool loopGPS()
 void setup()
 {
     Serial.begin(115200);
-    // Turn on DC boost to power on the modem
 #ifdef BOARD_POWERON_PIN
+    /* Set Power control pin output
+    * * @note      Known issues, ESP32 (V1.2) version of T-A7670, T-A7608,
+    *            when using battery power supply mode, BOARD_POWERON_PIN (IO12) must be set to high level after esp32 starts, otherwise a reset will occur.
+    * */
     pinMode(BOARD_POWERON_PIN, OUTPUT);
     digitalWrite(BOARD_POWERON_PIN, HIGH);
 #endif
 
     // Set modem reset pin ,reset modem
+#ifdef MODEM_RESET_PIN
     pinMode(MODEM_RESET_PIN, OUTPUT);
     digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL); delay(100);
     digitalWrite(MODEM_RESET_PIN, MODEM_RESET_LEVEL); delay(2600);
     digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL);
+#endif
 
+#ifdef MODEM_FLIGHT_PIN
+    // If there is an airplane mode control, you need to exit airplane mode
+    pinMode(MODEM_FLIGHT_PIN, OUTPUT);
+    digitalWrite(MODEM_FLIGHT_PIN, HIGH);
+#endif
+
+    // Pull down DTR to ensure the modem is not in sleep state
+    pinMode(MODEM_DTR_PIN, OUTPUT);
+    digitalWrite(MODEM_DTR_PIN, LOW);
+    
     // Turn on modem
     pinMode(BOARD_PWRKEY_PIN, OUTPUT);
     digitalWrite(BOARD_PWRKEY_PIN, LOW);
@@ -132,8 +150,10 @@ void setup()
     delay(1000);
     digitalWrite(BOARD_PWRKEY_PIN, LOW);
 
+#ifdef MODEM_RING_PIN
     // Set ring pin input
     pinMode(MODEM_RING_PIN, INPUT_PULLUP);
+#endif
 
     // Set modem baud
     SerialAT.begin(115200, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
@@ -190,7 +210,7 @@ void setup()
 
 
     Serial.println("Enabling GPS/GNSS/GLONASS");
-    while (!modem.enableGPS(MODEM_GPS_ENABLE_GPIO)) {
+    while (!modem.enableGPS(MODEM_GPS_ENABLE_GPIO, MODEM_GPS_ENABLE_LEVEL)) {
         Serial.print(".");
     }
     Serial.println();
@@ -211,7 +231,7 @@ void setup()
 
 
 void loop()
-{   
+{
     // New users please use GPS_BuiltIn https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/tree/main/examples/GPS_BuiltIn
     // This example explanation can be found here. Please do not ask invalid questions.
     // https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/issues/118
@@ -258,3 +278,7 @@ void loop()
     // Light sleep for one second to reduce running power consumption
     light_sleep(5000);
 }
+
+#ifndef TINY_GSM_FORK_LIBRARY
+#error "No correct definition detected, Please copy all the [lib directories](https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/tree/main/lib) to the arduino libraries directory , See README"
+#endif

@@ -5,7 +5,9 @@
  * @copyright Copyright (c) 2024  Shenzhen Xin Yuan Electronic Technology Co., Ltd
  * @date      2024-08-29
  * @note      SIM7670G does not support SMS and voice functions
+ *            `A7670E-LNXY-UBL` this version does not support voice and SMS functions.
  * ! Only read data, not decode data. For detailed SMS operation, please refer to A76XX_Series_AT_Command_Manual
+ * 
  */
 
 #include "utilities.h"
@@ -39,17 +41,32 @@ TinyGsm modem(SerialAT);
 void setup()
 {
     Serial.begin(115200);
-    // Turn on DC boost to power on the modem
 #ifdef BOARD_POWERON_PIN
+    /* Set Power control pin output
+    * * @note      Known issues, ESP32 (V1.2) version of T-A7670, T-A7608,
+    *            when using battery power supply mode, BOARD_POWERON_PIN (IO12) must be set to high level after esp32 starts, otherwise a reset will occur.
+    * */
     pinMode(BOARD_POWERON_PIN, OUTPUT);
     digitalWrite(BOARD_POWERON_PIN, HIGH);
 #endif
 
     // Set modem reset pin ,reset modem
+#ifdef MODEM_RESET_PIN
     pinMode(MODEM_RESET_PIN, OUTPUT);
     digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL); delay(100);
     digitalWrite(MODEM_RESET_PIN, MODEM_RESET_LEVEL); delay(2600);
     digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL);
+#endif
+
+#ifdef MODEM_FLIGHT_PIN
+    // If there is an airplane mode control, you need to exit airplane mode
+    pinMode(MODEM_FLIGHT_PIN, OUTPUT);
+    digitalWrite(MODEM_FLIGHT_PIN, HIGH);
+#endif
+
+    // Pull down DTR to ensure the modem is not in sleep state
+    pinMode(MODEM_DTR_PIN, OUTPUT);
+    digitalWrite(MODEM_DTR_PIN, LOW);
 
     // Turn on modem
     pinMode(BOARD_PWRKEY_PIN, OUTPUT);
@@ -59,8 +76,10 @@ void setup()
     delay(1000);
     digitalWrite(BOARD_PWRKEY_PIN, LOW);
 
+#ifdef MODEM_RING_PIN
     // Set ring pin input
     pinMode(MODEM_RING_PIN, INPUT_PULLUP);
+#endif
 
     // Set modem baud
     SerialAT.begin(115200, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
@@ -149,7 +168,7 @@ void setup()
 
     // A76XX_Series_AT_Command_Manual_V1.12.pdf : https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/blob/main/datasheet/A76XX/A76XX_Series_AT_Command_Manual_V1.12.pdf
     // A76XX Series_SMS_Application Note_V3.00.pdf : https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/blob/main/datasheet/A76XX/A76XX%20Series_SMS_Application%20Note_V3.00.pdf
-    
+
     String data;
     int8_t res;
 
@@ -230,3 +249,7 @@ void loop()
     }
     delay(1);
 }
+
+#ifndef TINY_GSM_FORK_LIBRARY
+#error "No correct definition detected, Please copy all the [lib directories](https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/tree/main/lib) to the arduino libraries directory , See README"
+#endif

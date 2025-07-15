@@ -5,7 +5,7 @@
  * @copyright Copyright (c) 2023  Shenzhen Xin Yuan Electronic Technology Co., Ltd
  * @date      2023-11-28
  * @note
- * * * Example is suitable for A7670X/A7608X/SIM7672 series
+ * * Example is suitable for A7670X/A7608X/SIM7670G/SIM7000G/SIM7600 series
  * * Connect MQTT Broker as https://aws.amazon.com/campaigns/IoT
  * * Example uses a forked TinyGSM <https://github.com/lewisxhe/TinyGSM>, which will not compile successfully using the mainline TinyGSM.
  * *!!!! When using ESP to connect to AWS, the AWS IOT HUB policy must be set to all devices, otherwise the connection cannot be made.
@@ -33,7 +33,7 @@ TinyGsm modem(debugger);
 TinyGsm modem(SerialAT);
 #endif
 
-// It depends on the operator whether to set up an APN. If some operators do not set up an APN, 
+// It depends on the operator whether to set up an APN. If some operators do not set up an APN,
 // they will be rejected when registering for the network. You need to ask the local operator for the specific APN.
 // APNs from other operators are welcome to submit PRs for filling.
 // #define NETWORK_APN     "CHN-CT"             //CHN-CT: China Telecom
@@ -42,7 +42,7 @@ TinyGsm modem(SerialAT);
 // The URL of xxxxxxx-ats.iot.ap-southeast-2.amazonaws.com can be found in the settings for endpoint in your AWS IOT Core account
 const char *broker = "xxxxxxx.iot.ap-southeast-2.amazonaws.com";
 const uint16_t broker_port = 8883;
-const char *clien_id = "A76XX";
+const char *client_id = "A76XX";
 
 // Replace the topic you want to subscribe to
 const char *subscribe_topic = "GsmMqttTest/subscribe";
@@ -71,11 +71,11 @@ bool mqtt_connect()
     Serial.print("Connecting to ");
     Serial.print(broker);
 
-    bool ret = modem.mqtt_connect(mqtt_client_id, broker, broker_port, clien_id);
+    bool ret = modem.mqtt_connect(mqtt_client_id, broker, broker_port, client_id);
     if (!ret) {
         Serial.println("Failed!"); return false;
     }
-    Serial.println("successed.");
+    Serial.println("successfully.");
 
     if (modem.mqtt_connected()) {
         Serial.println("MQTT has connected!");
@@ -100,16 +100,33 @@ void setup()
     SerialAT.begin(115200, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
 
 #ifdef BOARD_POWERON_PIN
+    /* Set Power control pin output
+    * * @note      Known issues, ESP32 (V1.2) version of T-A7670, T-A7608,
+    *            when using battery power supply mode, BOARD_POWERON_PIN (IO12) must be set to high level after esp32 starts, otherwise a reset will occur.
+    * */
     pinMode(BOARD_POWERON_PIN, OUTPUT);
     digitalWrite(BOARD_POWERON_PIN, HIGH);
 #endif
 
     // Set modem reset pin ,reset modem
+#ifdef MODEM_RESET_PIN
     pinMode(MODEM_RESET_PIN, OUTPUT);
     digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL); delay(100);
     digitalWrite(MODEM_RESET_PIN, MODEM_RESET_LEVEL); delay(2600);
     digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL);
+#endif
 
+#ifdef MODEM_FLIGHT_PIN
+    // If there is an airplane mode control, you need to exit airplane mode
+    pinMode(MODEM_FLIGHT_PIN, OUTPUT);
+    digitalWrite(MODEM_FLIGHT_PIN, HIGH);
+#endif
+
+    // Pull down DTR to ensure the modem is not in sleep state
+    pinMode(MODEM_DTR_PIN, OUTPUT);
+    digitalWrite(MODEM_DTR_PIN, LOW);
+    
+    // Turn on the modem
     pinMode(BOARD_PWRKEY_PIN, OUTPUT);
     digitalWrite(BOARD_PWRKEY_PIN, LOW);
     delay(100);
@@ -201,6 +218,12 @@ void setup()
     }
     Serial.println();
 
+#ifdef MODEM_REG_SMS_ONLY
+    while (status == REG_SMS_ONLY) {
+        Serial.println("Registered for \"SMS only\", home network (applicable only when E-UTRAN), this type of registration cannot access the network. Please check the APN settings and ask the operator for the correct APN information and the balance and package of the SIM card. If you still cannot connect, please replace the SIM card and test again. Related ISSUE: https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/issues/307#issuecomment-3034800353");
+        delay(5000);
+    }
+#endif
 
     Serial.printf("Registration Status:%d\n", status);
     delay(1000);
@@ -211,7 +234,7 @@ void setup()
         Serial.println(ueInfo);
     }
 
-    if (!modem.enableNetwork()) {
+    if (!modem.setNetworkActive()) {
         Serial.println("Enable network failed!");
     }
 
@@ -220,12 +243,18 @@ void setup()
     String ipAddress = modem.getLocalIP();
     Serial.print("Network IP:"); Serial.println(ipAddress);
 
+    // Check firmware version
+    modem.sendAT("+SIMCOMATI");
+    modem.waitResponse();
+
+    delay(2000);
+
     // Initialize MQTT, use SSL
     modem.mqtt_begin(true);
 
     // Set Amazon Certificate
     modem.mqtt_set_certificate(AmazonRootCA, AWSClientCertificate, AWSClientPrivateKey);
-    
+
     // Connecting to AWS IOT Core
     if (!mqtt_connect()) {
         return ;
@@ -265,6 +294,18 @@ void loop()
 /*
 TEST WITH
 
+20250507:
+ISSUE: https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/issues/245#issuecomment-2854747063
+Manufacturer: INCORPORATED
+Model: A7670E-FASE
+Revision: A011B07A7670M7_F
+A7670M7_B07V01_240927
+QCN:
+IMEI: XXXXXXXXXXXXXXXXX
+MEID:
++GCAP: +CGSM,+FCLASS,+DS
+DeviceInfo:
+
 20240821:
 A7670E-FASE: PN:S2-10AAW-Z319S
 Manufacturer: INCORPORATED
@@ -289,4 +330,35 @@ IMEI: XXXXXXXXXXXXXXXXX
 
 -------------------------------
 
+SIM7600 Version OK 20250709
+AT+SIMCOMATI
+Manufacturer: SIMCOM INCORPORATED
+Model: SIMCOM_SIM7600G-H
+Revision: LE20B04SIM7600G22
+QCN: 
+IMEI: xxxxxxxxxxxx
+MEID: 
++GCAP: +CGSM
+DeviceInfo: 173,170
+
+
+-----------------------------
+
+SIM7000G    # 2025/07/10:OK!
+AT+SIMCOMATI
+Revision:1529B11SIM7000G
+CSUB:V01
+APRev:1529B11SIM7000,V01
+QCN:MDM9206_TX3.0.SIM7000G_P1.03C_20240911
+
+!!!!!!!!!!!!!!!!FAILED 1529B11SIM7000 QCN:MDM9206_TX3.0.SIM7000G_P1.02_20180726
+Revision:1529B11SIM7000G
+CSUB:V01
+APRev:1529B11SIM7000,V01
+QCN:MDM9206_TX3.0.SIM7000G_P1.02_20180726
+!!!!!!!!!!!!!!!!FAILED 1529B11SIM7000 QCN:MDM9206_TX3.0.SIM7000G_P1.02_20180726
+
 */
+#ifndef TINY_GSM_FORK_LIBRARY
+#error "No correct definition detected, Please copy all the [lib directories](https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/tree/main/lib) to the arduino libraries directory , See README"
+#endif

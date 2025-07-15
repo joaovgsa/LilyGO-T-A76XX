@@ -5,7 +5,7 @@
  * @copyright Copyright (c) 2023  Shenzhen Xin Yuan Electronic Technology Co., Ltd
  * @date      2023-11-29
  * @note
- * * Example is suitable for A7670X/A7608X/SIM7672 series
+ * * Example is suitable for A7670X/A7608X/SIM7670G/SIM7000G/SIM7600 series
  * * Connect https://httpbin.org test get request
  * * Example uses a forked TinyGSM <https://github.com/lewisxhe/TinyGSM>, which will not compile successfully using the mainline TinyGSM.
  */
@@ -34,7 +34,18 @@ const char *request_url[] = {
     "https://httpbin.org/get",
     "https://vsh.pp.ua/TinyGSM/logo.txt",
     "https://ipapi.co/timezone",         // Access may be blocked by a firewall
-    "http://ip-api.com/json/23.158.104.183"
+    "http://ip-api.com/json/23.158.104.183",
+    "https://ikfu.azurewebsites.net/api/GetUtcTime"  // https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/issues/243
+};
+
+// ISSUES ： https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/issues/243
+// Azure server does not support automatic negotiation of SSL protocol and needs to be configured as SSL1.2
+ServerSSLVersion sslVersion[] = {
+    TINYGSM_SSL_AUTO,   // httpbin.org
+    TINYGSM_SSL_AUTO,   // vsh.pp.ua
+    TINYGSM_SSL_AUTO,   // ipapi.co
+    TINYGSM_SSL_AUTO,   // ip-api.com
+    TINYGSM_SSL_TLS1_2  // azure
 };
 
 void setup()
@@ -46,16 +57,33 @@ void setup()
     SerialAT.begin(115200, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
 
 #ifdef BOARD_POWERON_PIN
+    /* Set Power control pin output
+    * * @note      Known issues, ESP32 (V1.2) version of T-A7670, T-A7608,
+    *            when using battery power supply mode, BOARD_POWERON_PIN (IO12) must be set to high level after esp32 starts, otherwise a reset will occur.
+    * */
     pinMode(BOARD_POWERON_PIN, OUTPUT);
     digitalWrite(BOARD_POWERON_PIN, HIGH);
 #endif
 
     // Set modem reset pin ,reset modem
+#ifdef MODEM_RESET_PIN
     pinMode(MODEM_RESET_PIN, OUTPUT);
     digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL); delay(100);
     digitalWrite(MODEM_RESET_PIN, MODEM_RESET_LEVEL); delay(2600);
     digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL);
+#endif
 
+#ifdef MODEM_FLIGHT_PIN
+    // If there is an airplane mode control, you need to exit airplane mode
+    pinMode(MODEM_FLIGHT_PIN, OUTPUT);
+    digitalWrite(MODEM_FLIGHT_PIN, HIGH);
+#endif
+
+    // Pull down DTR to ensure the modem is not in sleep state
+    pinMode(MODEM_DTR_PIN, OUTPUT);
+    digitalWrite(MODEM_DTR_PIN, LOW);
+
+    // Turn on the modem
     pinMode(BOARD_PWRKEY_PIN, OUTPUT);
     digitalWrite(BOARD_PWRKEY_PIN, LOW);
     delay(100);
@@ -147,6 +175,12 @@ void setup()
     }
     Serial.println();
 
+#ifdef MODEM_REG_SMS_ONLY
+    while (status == REG_SMS_ONLY) {
+        Serial.println("Registered for \"SMS only\", home network (applicable only when E-UTRAN), this type of registration cannot access the network. Please check the APN settings and ask the operator for the correct APN information and the balance and package of the SIM card. If you still cannot connect, please replace the SIM card and test again. Related ISSUE: https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/issues/307#issuecomment-3034800353");
+        delay(5000);
+    }
+#endif
 
     Serial.printf("Registration Status:%d\n", status);
     delay(1000);
@@ -157,7 +191,7 @@ void setup()
         Serial.println(ueInfo);
     }
 
-    if (!modem.enableNetwork()) {
+    if (!modem.setNetworkActive()) {
         Serial.println("Enable network failed!");
     }
 
@@ -166,8 +200,7 @@ void setup()
     String ipAddress = modem.getLocalIP();
     Serial.print("Network IP:"); Serial.println(ipAddress);
 
-    // Initialize HTTPS
-    modem.https_begin();
+
 
     // If the status code 715 is returned, please see here
     // https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/issues/117
@@ -178,11 +211,14 @@ void setup()
 
         while (retry--) {
 
+            // Initialize HTTPS
+            modem.https_begin();
+
             Serial.print("Request URL : ");
             Serial.println(request_url[i]);
 
             // Set GET URT
-            if (!modem.https_set_url(request_url[i])) {
+            if (!modem.https_set_url(request_url[i], sslVersion[i])) {
                 Serial.print("Failed to request : "); Serial.println(request_url[i]);
 
                 // Debug
@@ -198,6 +234,8 @@ void setup()
             if (httpCode != 200) {
                 Serial.print("HTTP get failed ! error code = ");
                 Serial.println(httpCode);
+                // Disconnect http server
+                modem.https_end();
                 delay(3000);
                 continue;
             }
@@ -215,6 +253,9 @@ void setup()
             Serial.println(body);
 
             delay(3000);
+
+            // Disconnect http server
+            modem.https_end();
 
             break;
         }
@@ -234,3 +275,37 @@ void loop()
     }
     delay(1);
 }
+
+#ifndef TINY_GSM_FORK_LIBRARY
+#error "No correct definition detected, Please copy all the [lib directories](https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/tree/main/lib) to the arduino libraries directory , See README"
+#endif
+
+/*
+SIM7600 Version OK 20250709
+AT+SIMCOMATI
+Manufacturer: SIMCOM INCORPORATED
+Model: SIMCOM_SIM7600G-H
+Revision: LE20B04SIM7600G22
+QCN:
+IMEI: xxxxxxxxxxxx
+MEID:
++GCAP: +CGSM
+DeviceInfo: 173,170
+
+-------------------------------
+
+SIM7000G    # 2025/07/10:OK!
+Revision:1529B11SIM7000G
+CSUB:V01
+APRev:1529B11SIM7000,V01
+QCN:MDM9206_TX3.0.SIM7000G_P1.03C_20240911
+
+Revision:1529B11SIM7000G
+CSUB:V01
+APRev:1529B11SIM7000,V01
+QCN:MDM9206_TX3.0.SIM7000G_P1.02_20180726
+
+-------------------------------
+
+
+*/

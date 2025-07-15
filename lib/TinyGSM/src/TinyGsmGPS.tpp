@@ -24,8 +24,8 @@ class TinyGsmGPS {
   bool enableGPS(int8_t power_en_pin = -1,uint8_t enable_level = 1) {
     return thisModem().enableGPSImpl(power_en_pin,enable_level);
   }
-  bool disableGPS(int8_t power_en_pin =-1,uint8_t disbale_level = 0) {
-    return thisModem().disableGPSImpl(power_en_pin , disbale_level);
+  bool disableGPS(int8_t power_en_pin =-1,uint8_t disable_level = 0) {
+    return thisModem().disableGPSImpl(power_en_pin , disable_level);
   }
   bool isEnableGPS() {
     return thisModem().isEnableGPSImpl();
@@ -64,8 +64,8 @@ class TinyGsmGPS {
     return thisModem().setGPSOutputRateImpl(rate_hz);
   }
 
-  bool enableNMEA(){
-    return thisModem().enableNMEAImpl();
+  bool enableNMEA(bool outputAtPort = true){
+    return thisModem().enableNMEAImpl(outputAtPort);
   }
 
   bool disableNMEA(){
@@ -91,7 +91,7 @@ class TinyGsmGPS {
    */
 
   bool    enableGPSImpl(int8_t power_en_pin ,uint8_t enable_level) TINY_GSM_ATTR_NOT_IMPLEMENTED;
-  bool    disableGPSImpl(int8_t power_en_pin ,uint8_t disbale_level) TINY_GSM_ATTR_NOT_IMPLEMENTED;
+  bool    disableGPSImpl(int8_t power_en_pin ,uint8_t disable_level) TINY_GSM_ATTR_NOT_IMPLEMENTED;
   bool    isEnableGPSImpl() TINY_GSM_ATTR_NOT_IMPLEMENTED;
   bool    enableAGPSImpl() TINY_GSM_ATTR_NOT_IMPLEMENTED;
   String  getGPSrawImpl() TINY_GSM_ATTR_NOT_IMPLEMENTED;
@@ -103,7 +103,7 @@ class TinyGsmGPS {
   bool    setGPSBaudImpl(uint32_t baud)TINY_GSM_ATTR_NOT_IMPLEMENTED;
   bool    setGPSModeImpl(uint8_t mode)TINY_GSM_ATTR_NOT_IMPLEMENTED;
   bool    setGPSOutputRateImpl(uint8_t rate_hz)TINY_GSM_ATTR_NOT_IMPLEMENTED;
-  bool    enableNMEAImpl()TINY_GSM_ATTR_NOT_IMPLEMENTED;
+  bool    enableNMEAImpl(bool outputAtPort = true)TINY_GSM_ATTR_NOT_IMPLEMENTED;
   bool    disableNMEAImpl()TINY_GSM_ATTR_NOT_IMPLEMENTED;
   bool    configNMEASentenceImpl()TINY_GSM_ATTR_NOT_IMPLEMENTED;
 };

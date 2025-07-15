@@ -11,7 +11,7 @@
 #include <SPI.h>
 #include "utilities.h"
 
-#if defined(LILYGO_T_CALL_A7670_V1_0) || defined(LILYGO_T_A7608X_DC_S3)
+#if defined(LILYGO_T_CALL_A7670_V1_0) || defined(LILYGO_T_A7608X_DC_S3) || defined(LILYGO_T_PCIE_A767X)
 #error "This board not SD slot"
 #endif
 
@@ -185,6 +185,12 @@ void testFileIO(fs::FS &fs, const char *path)
 void setup()
 {
     Serial.begin(115200);
+
+#ifdef BOARD_POWERON_PIN
+    // T-A7670X V1.x SD card power supply and Modem are controlled by IO12. When using battery, IO12 must be set to HIGH
+    pinMode(BOARD_POWERON_PIN, OUTPUT);
+    digitalWrite(BOARD_POWERON_PIN, HIGH);
+#endif
 
     SPI.begin(BOARD_SCK_PIN, BOARD_MISO_PIN, BOARD_MOSI_PIN);
     if (!SD.begin(BOARD_SD_CS_PIN)) {

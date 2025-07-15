@@ -12,7 +12,7 @@
 // #define TINY_GSM_DEBUG Serial
 // #define TINY_GSM_USE_HEX
 
-#define TINY_GSM_MUX_COUNT 10
+#define TINY_GSM_MUX_COUNT 4
 #define TINY_GSM_BUFFER_READ_AND_CHECK_SIZE
 
 #include "TinyGsmBattery.tpp"
@@ -27,7 +27,8 @@
 #include "TinyGsmTime.tpp"
 #include "TinyGsmNTP.tpp"
 #include "TinyGsmMqttA76xx.h"
-#include "TinyGsmHttpsA76xx.h"
+#include "TinyGsmHttpsComm.h"
+#include "TinyGsmGPS_EX.tpp"
 
 #define GSM_NL "\r\n"
 static const char GSM_OK[] TINY_GSM_PROGMEM    = "OK" GSM_NL;
@@ -60,7 +61,8 @@ class TinyGsmSim7672 : public TinyGsmModem<TinyGsmSim7672>,
                        public TinyGsmTemperature<TinyGsmSim7672>,
                        public TinyGsmCalling<TinyGsmSim7672>,
                        public TinyGsmMqttA76xx<TinyGsmSim7672, TINY_GSM_MQTT_CLI_COUNT>,
-                       public TinyGsmHttpsA76xx<TinyGsmSim7672>
+                       public TinyGsmGPSEx<TinyGsmSim7672>,
+                       public TinyGsmHttpsComm<TinyGsmSim7672,QUALCOMM_SIM7670G> 
 {
   friend class TinyGsmModem<TinyGsmSim7672>;
   friend class TinyGsmGPRS<TinyGsmSim7672>;
@@ -74,7 +76,8 @@ class TinyGsmSim7672 : public TinyGsmModem<TinyGsmSim7672>,
   friend class TinyGsmTemperature<TinyGsmSim7672>;
   friend class TinyGsmCalling<TinyGsmSim7672>;
   friend class TinyGsmMqttA76xx<TinyGsmSim7672, TINY_GSM_MQTT_CLI_COUNT>;
-  friend class TinyGsmHttpsA76xx<TinyGsmSim7672>;
+  friend class TinyGsmHttpsComm<TinyGsmSim7672,QUALCOMM_SIM7670G>;
+  friend class TinyGsmGPSEx<TinyGsmSim7672>;
 
 
   /*
@@ -299,7 +302,7 @@ class TinyGsmSim7672 : public TinyGsmModem<TinyGsmSim7672>,
     return res;
   }
 
-  bool enableNetwork(){
+  bool setNetworkActive(){
     sendAT(GF("+NETOPEN"));  
     int res = waitResponse(GF("+NETOPEN: 0"),GF("+IP ERROR: Network is already opened")); 
     if (res != 1 && res != 2){
@@ -308,17 +311,89 @@ class TinyGsmSim7672 : public TinyGsmModem<TinyGsmSim7672>,
     return true;
   }
 
-  bool disableNetwork(){
+  bool setNetworkDeactivate(){
     sendAT(GF("+NETCLOSE"));  
     if (waitResponse() != 1){
       return false;
     }
     int res = waitResponse(GF("+NETCLOSE: 0"),GF("+NETCLOSE: 2")); 
-    if (res != 1 || res != 2){
+    if (res != 1 && res != 2){
       return false;
     }
     return true;
   }
+
+  bool getNetworkActive() {
+    sendAT(GF("+NETOPEN?"));
+    int res = waitResponse(GF("+NETOPEN: 1"));
+    if (res == 1) { return true; }
+    return false;
+  }
+
+  String getNetworkAPN() {
+    sendAT("+CGDCONT?");
+    if (waitResponse(GF(GSM_NL "+CGDCONT: ")) != 1) { return "ERROR"; }
+    streamSkipUntil(',');
+    streamSkipUntil(',');
+    streamSkipUntil('\"');
+    String res = stream.readStringUntil('\"');
+    waitResponse();
+    if (res == "") { res = "APN IS NOT SET"; }
+    return res;
+  }
+
+  bool setNetworkAPN(String apn) {
+    sendAT(GF("+CGDCONT=1,\"IP\",\""), apn, "\"");
+    return waitResponse() == 1;
+  }
+  
+  /*
+  * Return code:
+  *     -1 ping failed
+  *     1 Ping success
+  *     2 Ping time out
+  *     3 Ping result
+  * * */
+  int ping(const char *url, String &resolved_ip_addr,
+         uint32_t &rep_data_packet_size,
+         uint32_t &tripTime,
+         uint8_t &TTL)
+  {
+      uint8_t dest_addr_type = 1;
+      uint8_t num_pings = 1;
+      uint8_t data_packet_size = 64;
+      uint32_t interval_time = 1000;
+      uint32_t wait_time = 10000;
+      uint8_t ttl = 0xFF;
+      int result_type = -1;
+
+      sendAT("+CPING=\"", url, "\"", ",", dest_addr_type, ",",
+            num_pings, ",", data_packet_size, ",",
+            interval_time, ",", wait_time, ",", ttl);
+
+      if (waitResponse() != 1) {
+          return -1;
+      }
+      if (waitResponse(10000UL, "+CPING: ") == 1) {
+          result_type = streamGetIntBefore(',');
+          switch (result_type) {
+          case 1:
+              resolved_ip_addr = stream.readStringUntil(',');
+              rep_data_packet_size = streamGetIntBefore(',');
+              tripTime = streamGetIntBefore(',');
+              TTL = streamGetIntBefore('\n');
+              break;
+          case 2:
+              break;
+          case 3:
+              break;
+          default:
+              break;
+          }
+      } 
+      return result_type;
+  }
+  
   /*
    * GPRS functions
    */
@@ -448,6 +523,25 @@ class TinyGsmSim7672 : public TinyGsmModem<TinyGsmSim7672>,
    * GPS/GNSS/GLONASS location functions
    */
  protected:
+
+   bool gpsColdStartImpl() {
+    sendAT(GF("+CGPSCOLD"));
+    if (waitResponse(10000L) != 1) { return false; }
+    return true;
+  }
+
+  bool gpsWarmStartImpl() {
+    sendAT(GF("+CGPSWARM"));
+    if (waitResponse(10000L) != 1) { return false; }
+    return true;
+  }
+
+  bool gpsHotStartImpl() {
+    sendAT(GF("+CGPSHOT"));
+    if (waitResponse(10000L) != 1) { return false; }
+    return true;
+  }
+  
   // enable GPS
   bool enableGPSImpl(int8_t power_en_pin ,uint8_t enable_level) {
     if(power_en_pin!= -1){
@@ -456,17 +550,23 @@ class TinyGsmSim7672 : public TinyGsmModem<TinyGsmSim7672>,
       sendAT("+CGSETV=",power_en_pin,",",enable_level);
       waitResponse();
     }
+    if(isEnableGPSImpl()){
+      return true;
+    }
     sendAT(GF("+CGNSSPWR=1"));
     if (waitResponse() != 1) { return false; }
     return true;
   }
 
-  bool disableGPSImpl(int8_t power_en_pin ,uint8_t disbale_level) {
+  bool disableGPSImpl(int8_t power_en_pin ,uint8_t disable_level) {
     if(power_en_pin!= -1){
-      sendAT("+CGSETV=",power_en_pin,",",disbale_level);
+      sendAT("+CGSETV=",power_en_pin,",",disable_level);
       waitResponse();
       sendAT("+CGDRT=",power_en_pin,",0");
       waitResponse();
+    }
+    if(!isEnableGPSImpl()){
+      return true;
     }
     sendAT(GF("+CGNSSPWR=0"));
     if (waitResponse() != 1) { return false; }
@@ -476,9 +576,19 @@ class TinyGsmSim7672 : public TinyGsmModem<TinyGsmSim7672>,
   bool isEnableGPSImpl(){
     sendAT(GF("+CGNSSPWR?"));
     if (waitResponse("+CGNSSPWR: 1") != 1) { return false; }
+    waitResponse();
     return true;
   }
 
+  bool enableAGPSImpl() {
+    sendAT(GF("+CGNSSPWR?"));
+    if (waitResponse("+CGNSSPWR: 1") != 1) { return false; }
+    // +CGNSSPWR:<GNSS_Power_status>
+    sendAT("+CAGPS");
+    if (waitResponse(30000UL, "+AGPS: success") != 1) { return false; }
+    return true;
+  }
+  
   // get the RAW GPS output
   String getGPSrawImpl() {
     sendAT(GF("+CGNSSINFO"));
@@ -489,6 +599,83 @@ class TinyGsmSim7672 : public TinyGsmModem<TinyGsmSim7672>,
     return res;
   }
 
+  bool getGPS_ExImpl(GPSInfo& info) {
+    float lat = 0;
+    float lon = 0;
+    // +CGNSSINFO:[<mode>],
+    // [<GPS-SVs>],[BEIDOU-SVs],[<GLONASS-SVs>],[<GALILEO-SVs>],
+    // [<lat>],[<N/S>],[<log>],[<E/W>],[<date>],[<UTC-time>],[<alt>],[<speed>],[<course>],[<PDOP>],[HDOP],[VDOP]
+    sendAT(GF("+CGNSSINFO"));
+    if (waitResponse(GF(GSM_NL "+CGNSSINFO: ")) != 1) { return false; }
+
+    info.isFix = streamGetIntBefore(',');  // mode 2=2D Fix or 3=3DFix
+    if (info.isFix == 2 || info.isFix == 3) {
+      int16_t ret = -9999;
+      // GPS-SVs      satellite valid numbers
+      ret                    = streamGetIntBefore(',');
+      info.gps_satellite_num = ret != -9999 ? ret : 0;
+      // BEIDOU-SVs   satellite valid numbers
+      ret                       = streamGetIntBefore(',');
+      info.beidou_satellite_num = ret != -9999 ? ret : 0;
+      // GLONASS-SVs  satellite valid numbers
+      ret                        = streamGetIntBefore(',');
+      info.glonass_satellite_num = ret != -9999 ? ret : 0;
+      // GALILEO-SVs  satellite valid numbers
+      ret                        = streamGetIntBefore(',');
+      info.galileo_satellite_num = ret != -9999 ? ret : 0;
+      // Latitude in ddmm.mmmmmm
+      lat = streamGetFloatBefore(',');
+      // N/S Indicator, N=north or S=south
+      info.NS_indicator = stream.read();
+      streamSkipUntil(',');
+      // Longitude in ddmm.mmmmmm
+      lon = streamGetFloatBefore(',');
+      // E/W Indicator, E=east or W=west
+      info.EW_indicator = stream.read();
+      streamSkipUntil(',');
+      // Date. Output format is ddmmyy
+      // Two digit day
+      info.day = streamGetIntLength(2);
+      // Two digit month
+      info.month = streamGetIntLength(2);
+      // Two digit year
+      info.year = streamGetIntBefore(',');
+      // UTC Time. Output format is hhmmss.s
+      // Two digit hour
+      info.hour = streamGetIntLength(2);
+      // Two digit minute
+      info.minute = streamGetIntLength(2);
+      // 4 digit second with subseconds
+      float secondWithSS = streamGetFloatBefore(',');
+      info.second        = static_cast<int>(secondWithSS);
+      // MSL Altitude. Unit is meters
+      info.altitude = streamGetFloatBefore(',');
+      // Speed Over Ground. Unit is knots.
+      info.speed = streamGetFloatBefore(',');
+      // Course Over Ground. Degrees.
+      info.course = streamSkipUntil(',');
+      // After set, will report GPS every x seconds
+      streamSkipUntil(',');
+      // Position Dilution Of Precision
+      float pdop = streamGetFloatBefore(',');
+      info.PDOP  = pdop != -9999.0F ? pdop : 0;
+      // Horizontal Dilution Of Precision
+      float hdop = streamGetFloatBefore(',');
+      info.HDOP  = hdop != -9999.0F ? hdop : 0;
+      // Vertical Dilution Of Precision
+      float vdop = streamGetFloatBefore(',');
+      info.VDOP  = vdop != -9999.0F ? vdop : 0;
+      streamSkipUntil('\n');
+      waitResponse();
+      info.latitude  = (lat) * (info.NS_indicator == 'N' ? 1 : -1);
+      info.longitude = (lon) * (info.EW_indicator == 'E' ? 1 : -1);
+      if (info.year < 2000) { info.year += 2000; }
+      return true;
+    }
+
+    waitResponse();
+    return false;
+  }
  
 
   // get GPS informations
@@ -519,7 +706,7 @@ class TinyGsmSim7672 : public TinyGsmModem<TinyGsmSim7672>,
       int   imin         = 0;
       float secondWithSS = 0;
 
-      streamSkipUntil(',');               // GPS satellite valid numbers
+      ivsat = streamGetIntBefore(',');    // GPS satellite valid numbers
       streamSkipUntil(',');               // GLONASS satellite valid numbers
       streamSkipUntil(',');               // BEIDOU satellite valid numbers
       streamSkipUntil(',');
@@ -585,6 +772,15 @@ class TinyGsmSim7672 : public TinyGsmModem<TinyGsmSim7672>,
     return waitResponse(1000L) == 1;
   }
 
+  /*
+  * Model: SIM7670G
+  * 1  -  GPS
+  * 3  -  GPS + GLONASS
+  * 5  -  GPS + GALILEO
+  * 9  -  GPS + BDS
+  * 13 -  GPS + GALILEO + BDS
+  * 15 -  GPS + GLONASS + GALILEO + BDS
+  * */
   bool setGPSModeImpl(uint8_t mode){
       sendAT("+CGNSSMODE=",mode);
       return waitResponse(1000L) == 1;
@@ -595,8 +791,12 @@ class TinyGsmSim7672 : public TinyGsmModem<TinyGsmSim7672>,
       return waitResponse(1000L) == 1;
   }
 
-  bool enableNMEAImpl(){
-      sendAT("+CGNSSTST=1");
+  bool enableNMEAImpl(bool outputAtPort){
+      if(outputAtPort){
+        sendAT("+CGNSSTST=1");
+      }else{
+        sendAT("+CGNSSTST=0");
+      }
       waitResponse(1000L);
     // Select the output port for NMEA sentence
       sendAT("+CGNSSPORTSWITCH=0,1");

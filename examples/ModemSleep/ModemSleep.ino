@@ -5,7 +5,7 @@
  * @copyright Copyright (c) 2023  Shenzhen Xin Yuan Electronic Technology Co., Ltd
  * @date      2023-05-24
  * @record    https://youtu.be/2cjNsYcU6TU
- * @note      T-A7608 & T-A7608-S3 VBUS of the modem is connected to VUSB.
+ * @note      T-A7608 & T-A7608-S3 & T-A7670x VBUS of the modem is connected to VBUS.
  *            When using USB power supply, the modem cannot be set to sleep mode. Please see README for details.
  */
 #include "utilities.h"
@@ -36,8 +36,11 @@ void setup()
 
     SerialAT.begin(115200, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
 
-    // Turn on DC boost to power on the modem
 #ifdef BOARD_POWERON_PIN
+    /* Set Power control pin output
+    * * @note      Known issues, ESP32 (V1.2) version of T-A7670, T-A7608,
+    *            when using battery power supply mode, BOARD_POWERON_PIN (IO12) must be set to high level after esp32 starts, otherwise a reset will occur.
+    * */
     pinMode(BOARD_POWERON_PIN, OUTPUT);
     digitalWrite(BOARD_POWERON_PIN, HIGH);
 #endif
@@ -57,10 +60,11 @@ void setup()
         digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL);
 #endif
 
-        /*
-        BOARD_PWRKEY_PIN IO:4 The power-on signal of the modulator must be given to it,
-        otherwise the modulator will not reply when the command is sent
-        */
+        // Pull down DTR to wake up MODEM
+        pinMode(MODEM_DTR_PIN, OUTPUT);
+        digitalWrite(MODEM_DTR_PIN, LOW);
+
+    // Turn on the modem
         pinMode(BOARD_PWRKEY_PIN, OUTPUT);
         digitalWrite(BOARD_PWRKEY_PIN, LOW);
         delay(100);
@@ -100,6 +104,17 @@ void setup()
 
     delay(5000);
 
+#if 0
+    int retry = 15;
+    Serial.println("Disable GPS/GNSS/GLONASS");
+    while (!modem.disableGPS(MODEM_GPS_ENABLE_GPIO, !MODEM_GPS_ENABLE_LEVEL)) {
+        Serial.print(".");
+        if (retry-- <= 0) {
+            Serial.println("GPS startup failed. Please check whether the board you ordered contains GPS function."); delay(1000);
+        }
+    }
+#endif
+
 
     Serial.println("Enter modem sleep mode!");
 
@@ -118,11 +133,13 @@ void setup()
 
     delay(5000);
 
+    // If it doesn't sleep, please see README to remove the resistor, which is only needed when USB-C is used for power supply.
+    // https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/tree/main/examples/ModemSleep
     Serial.println("Check modem response .");
     while (modem.testAT()) {
         Serial.print("."); delay(500);
     }
-    Serial.println("Modem is not respone ,modem has sleep !");
+    Serial.println("Modem is not response ,modem has sleep !");
 
     delay(5000);
 
@@ -132,7 +149,7 @@ void setup()
 #endif
 
 #ifdef MODEM_RESET_PIN
-    // Keep it low during the sleep period. If the module uses GPIO5 as reset, 
+    // Keep it low during the sleep period. If the module uses GPIO5 as reset,
     // there will be a pulse when waking up from sleep that will cause the module to start directly.
     // https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/issues/85
     digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL);
@@ -152,3 +169,6 @@ void loop()
 {
 }
 
+#ifndef TINY_GSM_FORK_LIBRARY
+#error "No correct definition detected, Please copy all the [lib directories](https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/tree/main/lib) to the arduino libraries directory , See README"
+#endif

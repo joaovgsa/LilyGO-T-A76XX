@@ -8,7 +8,8 @@
  * T-A7608-S3 DeepSleep ~ 368 uA
  * T-A7608-ESP32  DeepSleep ~ 240 uA
  * T-A7670-ESP32  DeepSleep ~ 157 uA
- * 
+ * T-SIM7600-ESP32 DeepSleep ~ 200 uA
+ * T-SIM7000-ESP32 DeepSleep ~ 500 uA
  */
 #include "utilities.h"
 #include <driver/gpio.h>
@@ -38,6 +39,11 @@ void setup()
 
     SerialAT.begin(115200, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
 
+#ifdef BOARD_LED_PIN
+    pinMode(BOARD_LED_PIN, OUTPUT);
+    digitalWrite(BOARD_LED_PIN, LED_ON);
+#endif
+
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
         Serial.println("Wakeup timer");
         int i = 30;
@@ -50,8 +56,11 @@ void setup()
         Serial.println("TurnON Modem!");
     }
 
-    // Turn on DC boost to power on the modem
 #ifdef BOARD_POWERON_PIN
+    /* Set Power control pin output
+    * * @note      Known issues, ESP32 (V1.2) version of T-A7670, T-A7608,
+    *            when using battery power supply mode, BOARD_POWERON_PIN (IO12) must be set to high level after esp32 starts, otherwise a reset will occur.
+    * */
     pinMode(BOARD_POWERON_PIN, OUTPUT);
     digitalWrite(BOARD_POWERON_PIN, HIGH);
 #endif
@@ -70,10 +79,11 @@ void setup()
     digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL);
 #endif
 
+    // Pull down DTR to ensure the modem is not in sleep state
     pinMode(MODEM_DTR_PIN, OUTPUT);
     digitalWrite(MODEM_DTR_PIN, LOW);
 
-    Serial.println("Power on the modem PWRKEY.");
+    // Turn on the modem
     pinMode(BOARD_PWRKEY_PIN, OUTPUT);
     digitalWrite(BOARD_PWRKEY_PIN, LOW);
     delay(100);
@@ -81,10 +91,6 @@ void setup()
     //Ton >= 100 <= 500
     delay(300);
     digitalWrite(BOARD_PWRKEY_PIN, LOW);
-
-    // Pull up DTR to put the modem into sleep
-    pinMode(MODEM_DTR_PIN, OUTPUT);
-    digitalWrite(MODEM_DTR_PIN, HIGH);
 
     // Delay sometime ...
     delay(10000);
@@ -112,9 +118,13 @@ void setup()
     while (modem.testAT()) {
         Serial.print("."); delay(500);
     }
-    Serial.println("Modem is not respone ,modem has power off !");
+    Serial.println("Modem is not response ,modem has power off !");
 
     delay(5000);
+
+#ifdef BOARD_LED_PIN
+    digitalWrite(BOARD_LED_PIN, !LED_ON);
+#endif
 
 #ifdef BOARD_POWERON_PIN
     // Turn on DC boost to power off the modem
@@ -122,7 +132,7 @@ void setup()
 #endif
 
 #ifdef MODEM_RESET_PIN
-    // Keep it low during the sleep period. If the module uses GPIO5 as reset, 
+    // Keep it low during the sleep period. If the module uses GPIO5 as reset,
     // there will be a pulse when waking up from sleep that will cause the module to start directly.
     // https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/issues/85
     digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL);
@@ -141,3 +151,6 @@ void loop()
 {
 }
 
+#ifndef TINY_GSM_FORK_LIBRARY
+#error "No correct definition detected, Please copy all the [lib directories](https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/tree/main/lib) to the arduino libraries directory , See README"
+#endif

@@ -8,7 +8,7 @@
  *            Works only with externally mounted GPS modules.
  *            If the purchased board includes a GPS extension module it will work,
  *            otherwise this sketch will have no effect
- * @note      Onlu support T-A7670 board , not support T-Call A7670 , T-SIM7672
+ * @note      Onlu support T-A7670 board , not support T-Call A7670 , T-SIM7672 , T-PCIE
  */
 
 #ifndef SerialAT
@@ -81,6 +81,7 @@ void loop()
 {
     while (SerialGPS.available()) {
         int c = SerialGPS.read();
+        // Serial.write(c);     // Debug gps nmae message output to serial
         if (gps.encode(c)) {
             displayInfo();
         }

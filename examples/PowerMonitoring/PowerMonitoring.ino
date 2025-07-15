@@ -10,11 +10,14 @@
  *                         When connected to the USB, the battery voltage data read is not the real battery voltage, so the battery
  *                         voltage is sent to the UDP Server through UDP. When using it, please disconnect the USB-C
  *            T-A7670x :  Only version V1.4 has the resistor divider connected to the solar input, other versions IO38 is not connected
- * @note      Only support T-A7670 ,T-A7608X, T-SIM7672G board , not support T-Call A7670
+ * @note      Only support T-A7670 ,T-A7608X, T-SIM7672G board , not support T-Call A7670 , T-PCIE-A7670
  */
 
 #include "utilities.h"
 
+#ifndef BOARD_BAT_ADC_PIN
+#error "No support this board"
+#endif
 
 // Define the serial console for debug prints, if needed
 #define TINY_GSM_DEBUG SerialMon
@@ -116,10 +119,12 @@ void setup()
 
 
     // Set modem reset pin ,reset modem
+#ifdef MODEM_RESET_PIN
     pinMode(MODEM_RESET_PIN, OUTPUT);
     digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL); delay(100);
     digitalWrite(MODEM_RESET_PIN, MODEM_RESET_LEVEL); delay(2600);
     digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL);
+#endif
 
     // Turn on modem
     pinMode(BOARD_PWRKEY_PIN, OUTPUT);
@@ -129,8 +134,10 @@ void setup()
     delay(1000);
     digitalWrite(BOARD_PWRKEY_PIN, LOW);
 
+#ifdef MODEM_RING_PIN
     // Set ring pin input
     pinMode(MODEM_RING_PIN, INPUT_PULLUP);
+#endif
 
     // Set modem baud
     SerialAT.begin(115200, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
@@ -232,3 +239,7 @@ void loop()
     // Light sleep for one second to reduce running power consumption
     light_sleep(1000);
 }
+
+#ifndef TINY_GSM_FORK_LIBRARY
+#error "No correct definition detected, Please copy all the [lib directories](https://github.com/Xinyuan-LilyGO/LilyGO-T-A76XX/tree/main/lib) to the arduino libraries directory , See README"
+#endif
