@@ -2,63 +2,46 @@
  * @file      GPS_Acceleration.ino
  * @author    Lewis He (lewishe@outlook.com)
  * @license   MIT
- * @copyright Copyright (c) 2024  Shenzhen Xin Yuan Electronic Technology Co., Ltd
+ * @copyright Copyright (c) 2024 Shenzhen Xin Yuan Electronic Technology Co., Ltd
  * @date      2024-09-09
  * @note      
  *            GPS acceleration only supports A7670X/A7608X (excluding A7670G and other versions that do not support positioning). 
  *            SIM7670G does not support GPS acceleration function
  */
-#include "utilities.h"
 
+#include "utilities.h"
+#define TINY_GSM_MODEM_SIM7600
 #define TINY_GSM_RX_BUFFER 1024 // Set RX buffer to 1Kb
 
 // Set serial for debug console (to the Serial Monitor, default speed 115200)
 #define SerialMon Serial
 
-
 // Define the serial console for debug prints, if needed
 #define TINY_GSM_DEBUG SerialMon
 
-// See all AT commands, if wanted
-// #define DUMP_AT_COMMANDS
-
-
 #include <TinyGsmClient.h>
 
-#ifdef DUMP_AT_COMMANDS  // if enabled it requires the streamDebugger lib
-#include <StreamDebugger.h>
-StreamDebugger debugger(SerialAT, SerialMon);
-TinyGsm modem(debugger);
-#else
 TinyGsm modem(SerialAT);
-#endif
 
-
-#ifdef TINY_GSM_MODEM_SIM7672
-#error "SIM7670G is not support gps acceleration"
-#endif
-
-
-// It depends on the operator whether to set up an APN. If some operators do not set up an APN,
-// they will be rejected when registering for the network. You need to ask the local operator for the specific APN.
-// APNs from other operators are welcome to submit PRs for filling.
-// #define NETWORK_APN     "CHN-CT"             //CHN-CT: China Telecom
-
+// Define modem pins (ajuste conforme necessário)
+#define MODEM_RX_PIN 16 // Exemplo
+#define MODEM_TX_PIN 17 // Exemplo
+#define BOARD_POWERON_PIN 5 // Exemplo
+#define MODEM_RESET_PIN 4 // Exemplo
+#define BOARD_PWRKEY_PIN 23 // Exemplo
 
 void setup()
 {
     Serial.begin(115200);
     // Turn on DC boost to power on the modem
-#ifdef BOARD_POWERON_PIN
     pinMode(BOARD_POWERON_PIN, OUTPUT);
     digitalWrite(BOARD_POWERON_PIN, HIGH);
-#endif
 
-    // Set modem reset pin ,reset modem
+    // Set modem reset pin, reset modem
     pinMode(MODEM_RESET_PIN, OUTPUT);
-    digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL); delay(100);
-    digitalWrite(MODEM_RESET_PIN, MODEM_RESET_LEVEL); delay(2600);
-    digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL);
+    digitalWrite(MODEM_RESET_PIN, LOW); delay(100);
+    digitalWrite(MODEM_RESET_PIN, HIGH); delay(2600);
+    digitalWrite(MODEM_RESET_PIN, LOW);
 
     // Turn on modem
     pinMode(BOARD_PWRKEY_PIN, OUTPUT);
@@ -76,7 +59,7 @@ void setup()
 
     int retry = 0;
     while (!modem.testAT(1000)) {
-        Serial.println(".");
+        Serial.println("Testing modem...");
         if (retry++ > 10) {
             digitalWrite(BOARD_PWRKEY_PIN, LOW);
             delay(100);
@@ -86,203 +69,102 @@ void setup()
             retry = 0;
         }
     }
-    Serial.println();
+    Serial.println("Modem ready");
     delay(200);
-
-    String modemName = "UNKOWN";
-    while (1) {
-        modemName = modem.getModemName();
-        if (modemName == "UNKOWN") {
-            Serial.println("Unable to obtain module information normally, try again");
-            delay(1000);
-        } else if (modemName.startsWith("A7670G")) {
-            while (1) {
-                Serial.println("A7670G does not support built-in GPS function, please run examples/GPSShield");
-                delay(1000);
-            }
-        } else {
-            Serial.print("Model Name:");
-            Serial.println(modemName);
-            break;
-        }
-        delay(5000);
-    }
-
-    modem.sendAT("+SIMCOMATI");
-    modem.waitResponse();
-
 
     // Check if SIM card is online
     SimStatus sim = SIM_ERROR;
     while (sim != SIM_READY) {
         sim = modem.getSimStatus();
         switch (sim) {
-        case SIM_READY:
-            Serial.println("SIM card online");
-            break;
-        case SIM_LOCKED:
-            Serial.println("The SIM card is locked. Please unlock the SIM card first.");
-            // const char *SIMCARD_PIN_CODE = "123456";
-            // modem.simUnlock(SIMCARD_PIN_CODE);
-            break;
-        default:
-            break;
+            case SIM_READY:
+                Serial.println("SIM card online");
+                break;
+            case SIM_LOCKED:
+                Serial.println("The SIM card is locked. Please unlock the SIM card first.");
+                break;
+            default:
+                break;
         }
         delay(1000);
     }
 
-    //SIM7672G Can't set network mode
-    if (!modem.setNetworkMode(MODEM_NETWORK_AUTO)) {
-        Serial.println("Set network mode failed!");
-    }
-    String mode = modem.getNetworkModes();
-    Serial.print("Current network mode : ");
-    Serial.println(mode);
+    // Configuração automática de rede
+    modem.sendAT("+CREG?");
+    modem.waitResponse();
 
-
-#ifdef NETWORK_APN
-    Serial.printf("Set network apn : %s\n", NETWORK_APN);
-    modem.sendAT(GF("+CGDCONT=1,\"IP\",\""), NETWORK_APN, "\"");
-    if (modem.waitResponse() != 1) {
-        Serial.println("Set network apn error !");
-    }
-#endif
-
-    // Check network registration status and network signal status
-    int16_t sq ;
+    // Check network registration status
     Serial.print("Wait for the modem to register with the network.");
     RegStatus status = REG_NO_RESULT;
     while (status == REG_NO_RESULT || status == REG_SEARCHING || status == REG_UNREGISTERED) {
         status = modem.getRegistrationStatus();
         switch (status) {
-        case REG_UNREGISTERED:
-        case REG_SEARCHING:
-            sq = modem.getSignalQuality();
-            Serial.printf("[%lu] Signal Quality:%d\n", millis() / 1000, sq);
-            delay(1000);
-            break;
-        case REG_DENIED:
-            Serial.println("Network registration was rejected, please check if the APN is correct");
-            return ;
-        case REG_OK_HOME:
-            Serial.println("Online registration successful");
-            break;
-        case REG_OK_ROAMING:
-            Serial.println("Network registration successful, currently in roaming mode");
-            break;
-        default:
-            Serial.printf("Registration Status:%d\n", status);
-            delay(1000);
-            break;
+            case REG_UNREGISTERED:
+            case REG_SEARCHING:
+                Serial.printf("Signal Quality: %d\n", modem.getSignalQuality());
+                delay(1000);
+                break;
+            case REG_OK_HOME:
+            case REG_OK_ROAMING:
+                Serial.println("Online registration successful");
+                break;
+            default:
+                Serial.printf("Registration Status: %d\n", status);
+                delay(1000);
+                break;
         }
     }
     Serial.println();
 
-
-    Serial.printf("Registration Status:%d\n", status);
-    delay(1000);
-
-    String ueInfo;
-    if (modem.getSystemInformation(ueInfo)) {
-        Serial.print("Inquiring UE system information:");
-        Serial.println(ueInfo);
-    }
-
-    if (!modem.enableNetwork()) {
-        Serial.println("Enable network failed!");
-    }
-
-    delay(5000);
-
-    String ipAddress = modem.getLocalIP();
-    Serial.print("Network IP:"); Serial.println(ipAddress);
-
-
-    /*
-    *   A7608 B08 firmware has GPS positioning problems. If it is B08 version, you need to upgrade the A7608 firmware.
-    *
-    *   Manufacturer: INCORPORATED
-    *   Model: A7608SA-H
-    *   Revision: A50C4B08A7600M7
-    *   A7600M7_B08V02_220929
-    *   QCN:
-    *   IMEI: xxxxxxxxxxxxx
-    *   MEID:
-    *   +GCAP: +CGSM,+FCLASS,+DS
-    *   DeviceInfo:
-    *
-    *   +CGNSSINFO: 2,04,00,21.xxxxx,N,114.xxxxxxxx,E,020924,094145.00,-34.0,1.403,,6.9,6.8,1.0,03
-    */
-
-
-    Serial.println("Enabling GPS/GNSS/GLONASS");
+    // Enable GPS
+    Serial.println("Enabling GPS/GNSS");
     while (!modem.enableGPS(MODEM_GPS_ENABLE_GPIO)) {
         Serial.print(".");
     }
-    Serial.println();
     Serial.println("GPS Enabled");
 
-    // Set GPS Baud to 115200
-    modem.setGPSBaud(115200);
-
-
-    // GPS acceleration only supports A7670X/A7608X (excluding A7670G and other versions that do not support positioning). 
-    // SIM7670G does not support GPS acceleration function
+    // Enable GPS acceleration
     Serial.println("GPS acceleration is enabled");
     if (!modem.enableAGPS()) {
-        Serial.println(" failed !!!");
-    }else{
-        Serial.println(" success!!!");
+        Serial.println("GPS acceleration failed!!!");
+    } else {
+        Serial.println("GPS acceleration success!!!");
     }
-
 }
 
 void loop()
 {
-    float lat2      = 0;
-    float lon2      = 0;
-    float speed2    = 0;
-    float alt2      = 0;
-    int   vsat2     = 0;
-    int   usat2     = 0;
+    float lat2 = 0;
+    float lon2 = 0;
+    float speed2 = 0;
+    float alt2 = 0;
+    int vsat2 = 0;
+    int usat2 = 0;
     float accuracy2 = 0;
-    int   year2     = 0;
-    int   month2    = 0;
-    int   day2      = 0;
-    int   hour2     = 0;
-    int   min2      = 0;
-    int   sec2      = 0;
-    uint8_t    fixMode   = 0;
-    for (;;) {
-        Serial.println("Requesting current GPS/GNSS/GLONASS location");
-        if (modem.getGPS(&fixMode, &lat2, &lon2, &speed2, &alt2, &vsat2, &usat2, &accuracy2,
-                         &year2, &month2, &day2, &hour2, &min2, &sec2)) {
+    int year2 = 0;
+    int month2 = 0;
+    int day2 = 0;
+    int hour2 = 0;
+    int min2 = 0;
+    int sec2 = 0;
+    uint8_t fixMode = 0;
 
-            Serial.print("FixMode:"); Serial.println(fixMode);
-            Serial.print("Latitude:"); Serial.print(lat2, 6); Serial.print("\tLongitude:"); Serial.println(lon2, 6);
-            Serial.print("Speed:"); Serial.print(speed2); Serial.print("\tAltitude:"); Serial.println(alt2);
-            Serial.print("Visible Satellites:"); Serial.print(vsat2); Serial.print("\tUsed Satellites:"); Serial.println(usat2);
-            Serial.print("Accuracy:"); Serial.println(accuracy2);
-
-            Serial.print("Year:"); Serial.print(year2);
-            Serial.print("\tMonth:"); Serial.print(month2);
-            Serial.print("\tDay:"); Serial.println(day2);
-
-            Serial.print("Hour:"); Serial.print(hour2);
-            Serial.print("\tMinute:"); Serial.print(min2);
-            Serial.print("\tSecond:"); Serial.println(sec2);
-            break;
-        } else {
-            Serial.println("Couldn't get GPS/GNSS/GLONASS location, retrying in 15s.");
-            delay(15000UL);
-        }
+    Serial.println("Requesting current GPS/GNSS location");
+    if (modem.getGPS(&fixMode, &lat2, &lon2, &speed2, &alt2, &vsat2, &usat2, &accuracy2,
+                     &year2, &month2, &day2, &hour2, &min2, &sec2)) {
+        Serial.print("FixMode: "); Serial.println(fixMode);
+        Serial.print("Latitude: "); Serial.print(lat2, 6); Serial.print("\tLongitude: "); Serial.println(lon2, 6);
+        Serial.print("Speed: "); Serial.print(speed2); Serial.print("\tAltitude: "); Serial.println(alt2);
+        Serial.print("Visible Satellites: "); Serial.print(vsat2); Serial.print("\tUsed Satellites: "); Serial.println(usat2);
+        Serial.print("Accuracy: "); Serial.println(accuracy2);
+        Serial.print("Date: "); Serial.print(year2); Serial.print("/"); Serial.print(month2); Serial.print("/"); Serial.print(day2);
+        Serial.print(" Time: "); Serial.print(hour2); Serial.print(":"); Serial.print(min2); Serial.print(":"); Serial.println(sec2);
+    } else {
+        Serial.println("Couldn't get GPS location, retrying in 15s.");
+        delay(15000UL);
     }
-    Serial.println("Retrieving GPS/GNSS/GLONASS location again as a string");
-    String gps_raw = modem.getGPSraw();
-    Serial.print("GPS/GNSS Based Location String:");
-    Serial.println(gps_raw);
-    Serial.println("Disabling GPS");
 
+    Serial.println("Disabling GPS");
     modem.disableGPS();
 
     while (1) {
@@ -295,4 +177,3 @@ void loop()
         delay(1);
     }
 }
-

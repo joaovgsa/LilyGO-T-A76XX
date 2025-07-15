@@ -27,7 +27,7 @@
 //! SIM7672G and SIM7670G are exactly the same, except for the name change
 // #define LILYGO_T_SIM767XG_S3
 
-// #define LILYGO_T_A7608X
+#define LILYGO_T_A7608X
 
 // #define LILYGO_T_A7608X_S3
 
@@ -232,12 +232,3 @@
 #else
 #error "Use ArduinoIDE, please open the macro definition corresponding to the board above <utilities.h>"
 #endif
-
-
-
-
-
-
-
-
-
